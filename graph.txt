@@ -1,0 +1,36 @@
+Graph Representation:
+- Nodes:
+  - Place nodes:
+    - Hushan Hiking Trail
+  - User nodes:
+    - James Ting
+    - Karen Teoh
+    - Andreas Stenström
+    - Swetha Manupati
+    - Sarah Shewey
+
+- Edges:
+  - Review edges:
+    - James Ting -> Hushan Hiking Trail
+    - Karen Teoh -> Hushan Hiking Trail
+    - Andreas Stenström -> Hushan Hiking Trail
+    - Swetha Manupati -> Hushan Hiking Trail
+    - Sarah Shewey -> Hushan Hiking Trail
+
+- Attributes:
+  - Place attributes:
+    - Name: Hushan Hiking Trail
+    - Location: Xinyi District, Taipei City, Taiwan
+    - Rating: 4.4
+    - Number of User Ratings: 1699
+    - Editorial Summary: Picturesque jungle trail featuring stairs, sculptures & elevated views of Taipei.
+    - Wheelchair Accessible Entrance: False
+    - Opening Hours: Open 24 hours
+  - Review attributes:
+    - Author Name: [User Name]
+    - Rating: [Rating Value]
+    - Review Text: [Review Text]
+    - Review Date: [Review Date]
+
+- Weights:
+  - Edge Weights: [Based on relevance, e.g., similarity between reviews, recency, etc.]
