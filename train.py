@@ -9,15 +9,7 @@ import tqdm
 import torch
 from torch import nn, optim, Tensor
 
-with open('data/places_data_new.json', 'r', encoding='utf-8') as file:
-    data = json.load(file)
-
-data,num_users,num_places = preprocess.load_encode_data(data=data)
-edge_index = preprocess.load_edge(data)
-train_edge_index, val_edge_index, test_edge_index, num_interactions = preprocess.data_split(edge_index=edge_index)
-
-
-def train_eval_LightGCN_ratings():
+def train_eval_LightGCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions):
     layers = 4
     model = LightGCN(num_users=num_users,
                     num_items=num_places,
@@ -107,3 +99,19 @@ def train_eval_LightGCN_ratings():
                                                                 )
 
     print(f"[test_loss: {round(test_loss, 5)}, test_recall@{K}: {round(test_recall, 5)}, test_precision@{K}: {round(test_precision, 5)}, test_ndcg@{K}: {round(test_ndcg, 5)}")
+
+
+with open('data/places_data_new.json', 'r', encoding='utf-8') as file:
+    data = json.load(file)
+
+def prepare_sentiment_score():
+    data,num_users,num_places = preprocess.load_encode_data(data=data)
+    edge_index = preprocess.load_edge(data)
+    train_edge_index, val_edge_index, test_edge_index, num_interactions = preprocess.data_split(edge_index=edge_index)
+    train_eval_LightGCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions)
+
+def prepare_ratings():
+    data,num_users,num_places = preprocess.load_encode_data(data=data)
+    edge_index = preprocess.load_edge(data)
+    train_edge_index, val_edge_index, test_edge_index, num_interactions = preprocess.data_split(edge_index=edge_index)
+    train_eval_LightGCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions)
