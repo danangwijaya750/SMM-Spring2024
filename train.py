@@ -9,7 +9,7 @@ import tqdm
 import torch
 from torch import nn, optim, Tensor
 
-with open('places_data_new.json', 'r', encoding='utf-8') as file:
+with open('data/places_data_new.json', 'r', encoding='utf-8') as file:
     data = json.load(file)
 
 data,num_users,num_places = preprocess.load_encode_data(data=data)
