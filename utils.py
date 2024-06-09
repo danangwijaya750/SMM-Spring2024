@@ -4,7 +4,7 @@ import torch
 from torch_sparse import SparseTensor, matmul
 from torch_geometric.utils import structured_negative_sampling
 
-def convert_r_mat_edge_index_to_adj_mat_edge_index(input_edge_index, num_users,num_places):
+def convert_r_mat_edge_index_to_adj_mat_edge_index(input_edge_index, num_users, num_places):
     R = torch.zeros((num_users, num_places))
     for i in range(len(input_edge_index[0])):
         row_idx = input_edge_index[0][i]
@@ -19,7 +19,7 @@ def convert_r_mat_edge_index_to_adj_mat_edge_index(input_edge_index, num_users,n
     adj_mat_coo = adj_mat_coo.indices()
     return adj_mat_coo
 
-def convert_adj_mat_edge_index_to_r_mat_edge_index(input_edge_index,num_users,num_places):
+def convert_adj_mat_edge_index_to_r_mat_edge_index(input_edge_index, num_users, num_places):
     sparse_input_edge_index = SparseTensor(row=input_edge_index[0],
                                            col=input_edge_index[1],
                                            sparse_sizes=((num_users + num_places), num_users + num_places))

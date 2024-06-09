@@ -128,7 +128,7 @@ def RecallPrecision_ATk(groundTruth, r, k):
 def get_metrics(model,
                 input_edge_index, # adj_mat based edge index
                 input_exclude_edge_indices, # adj_mat based exclude edge index
-                k):
+                k, num_users,num_places):
     """Computes the evaluation metrics: recall, precision, and ndcg @ k
 
     Args:
@@ -150,11 +150,11 @@ def get_metrics(model,
 
     # convert adj_mat based edge index to r_mat based edge index so we have have
     # the first list being user_ids and second list being item_ids for the edge index
-    edge_index = convert_adj_mat_edge_index_to_r_mat_edge_index(input_edge_index)
+    edge_index = convert_adj_mat_edge_index_to_r_mat_edge_index(input_edge_index, num_users,num_places)
 
     # This is to exclude the edges we have seen before in our predicted interaction matrix (r_mat_rating)
     # E.g: for validation set, we want want to exclude all the edges in training set
-    exclude_edge_indices = [convert_adj_mat_edge_index_to_r_mat_edge_index(exclude_edge_index) \
+    exclude_edge_indices = [convert_adj_mat_edge_index_to_r_mat_edge_index(exclude_edge_index, num_users,num_places) \
                                       for exclude_edge_index in input_exclude_edge_indices]
 
 
@@ -213,9 +213,9 @@ def get_metrics(model,
 
     return recall, precision, ndcg
 
-def get_embs_for_bpr(model, input_edge_index, BATCH_SIZE, device):
+def get_embs_for_bpr(model, input_edge_index, BATCH_SIZE, device, num_users,num_places):
     users_emb_final, users_emb_0, items_emb_final, items_emb_0 = model.forward(input_edge_index)
-    edge_index_to_use = convert_adj_mat_edge_index_to_r_mat_edge_index(input_edge_index)
+    edge_index_to_use = convert_adj_mat_edge_index_to_r_mat_edge_index(input_edge_index, num_users, num_places)
 
     # Mini-batching for evaluation and loss calculation
     user_indices, pos_item_indices, neg_item_indices = sample_mini_batch(BATCH_SIZE, edge_index_to_use)
@@ -241,13 +241,13 @@ def get_embs_for_bpr(model, input_edge_index, BATCH_SIZE, device):
 
     return users_emb_final_batch, users_emb_0_batch, pos_items_emb_final_batch, pos_items_emb_0_batch, neg_items_emb_final_batch, neg_items_emb_0_batch
 
-def evaluation(model, edge_index, exclude_edge_indices, k, lambda_val):
+def evaluation(model, edge_index, exclude_edge_indices, k, lambda_val, num_users,num_places):
     """Evaluates model loss and metrics including recall, precision, ndcg @ k"""
 
     # get embeddings
     users_emb_final, users_emb_0, items_emb_final, items_emb_0 = model.forward(edge_index)
 
-    r_mat_edge_index = convert_adj_mat_edge_index_to_r_mat_edge_index(edge_index)
+    r_mat_edge_index = convert_adj_mat_edge_index_to_r_mat_edge_index(edge_index, num_users,num_places)
     edges = structured_negative_sampling(r_mat_edge_index, contains_neg_self_loops=False)
     user_indices, pos_item_indices, neg_item_indices = edges[0], edges[1], edges[2]
 
@@ -268,6 +268,6 @@ def evaluation(model, edge_index, exclude_edge_indices, k, lambda_val):
 
     loss = bpr_loss(users_emb_final, users_emb_0, pos_items_emb_final, pos_items_emb_0, neg_items_emb_final, neg_items_emb_0, lambda_val).item()
 
-    recall, precision, ndcg = get_metrics(model, edge_index, exclude_edge_indices, k)
+    recall, precision, ndcg = get_metrics(model, edge_index, exclude_edge_indices, k,num_users=num_users,num_places=num_places)
 
     return loss, recall, precision, ndcg

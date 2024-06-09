@@ -5,6 +5,8 @@ import json
 from tqdm import tqdm
 import torch
 from sklearn.model_selection import train_test_split
+from transformers import pipeline
+from collections import Counter
 
 def load_encode_data(data):
     # Create bipartite graph
@@ -26,6 +28,82 @@ def load_encode_data(data):
     num_places = len(ratings_df['place_id'].unique())
     
     return ratings_df,num_users,num_places
+
+def classify_long_review_pipeline(review,classification):
+    # Define chunk size and stride
+    chunk_size = 512
+    stride = 256
+
+    # Helper function to classify a single chunk
+    def classify_chunk(chunk):
+        result = classification([chunk])
+        if result:
+            result = result[0]
+            score = result.get('score', 0)  # Extract the score from the dictionary or default to 0
+            label = result.get('label', 'UNKNOWN')  # Extract the label from the dictionary or default to 'UNKNOWN'
+            return score, label
+        return 0, 'UNKNOWN'
+
+    # Check if the review length is shorter than the chunk size
+    if len(review) <= chunk_size:
+        return classify_chunk(review)
+
+    # Split the review into overlapping chunks
+    chunks = []
+    for i in range(0, len(review), stride):
+        chunk = review[i:i + chunk_size]
+        if len(chunk) < chunk_size and i + chunk_size > len(review):
+            chunk = review[i:]  # Take the remaining part of the review
+        chunks.append(chunk)
+
+    # Classify each chunk using the sentiment analysis pipeline
+    chunk_results = []
+    for chunk in chunks:
+        score, label = classify_chunk(chunk)
+        chunk_results.append((score, label))
+
+    # Check if chunk_results is empty
+    if not chunk_results:
+        return None  # Return None if no chunks were generated or no scores were returned
+
+    # # Calculate final score and determine final label
+    # weighted_sum = sum(label_to_value[label] * score for score, label in chunk_results)
+    # total_weight = sum(score for score, label in chunk_results)
+    # final_score = weighted_sum / total_weight if total_weight != 0 else 0
+
+    # # Determine the final label based on the sign of the final_score
+    # final_label = 'POSITIVE' if final_score > 0 else 'NEGATIVE'
+    total_score = sum(score for score, label in chunk_results)
+    final_score = total_score / len(chunk_results)
+
+    # Determine the most frequent label
+    labels = [label for score, label in chunk_results]
+    label_counter = Counter(labels)
+    final_label = label_counter.most_common(1)[0][0]
+
+    return final_score, final_label
+
+
+def preprocess_sentiment_score(ratings_df):
+    model_name="lxyuan/distilbert-base-multilingual-cased-sentiments-student"
+    classification = pipeline('sentiment-analysis', model=model_name,device=0)
+    reviews=ratings_df['text'].to_numpy()
+    reviews_scores = [classify_long_review_pipeline(review,classification) for review in reviews]
+    ratings_df['sentiment_score'] = [x[0] for x in reviews_scores]
+    ratings_df['sentiment_label'] = [x[1] for x in reviews_scores]
+    label_to_weight = {'negative': 0.5, 'neutral': 1.0, 'positive': 1.5}
+    # Scale sentiment scores based on weights
+    ratings_df['weighted_sentiment_score'] = ratings_df.apply(
+        lambda row: row['sentiment_score'] * label_to_weight[row['sentiment_label']], axis=1)
+    # Normalize the weighted sentiment scores to the range 0.00 to 5.00
+    min_score = ratings_df['weighted_sentiment_score'].min()
+    max_score = ratings_df['weighted_sentiment_score'].max()
+    ratings_df['normalized_weighted_sentiment_score'] = ratings_df['weighted_sentiment_score'].apply(
+        lambda x: 5.00 * (x - min_score) / (max_score - min_score))
+    ratings_df['normalized_weighted_sentiment_score'] = ratings_df['normalized_weighted_sentiment_score'].apply(
+        lambda x: round(x * 2) / 2 )
+    return ratings_df
+
 
 def load_edge(df,
                   src_index_col,
@@ -50,9 +128,9 @@ def load_edge(df,
     # Constructing COO format edge_index from input rating events
 
     # get user_ids from rating events in the order of occurance
-    src = [user_id for user_id in  df['user_id']]
+    src = [user_id for user_id in  df[src_index_col]]
     # get movie_id from rating events in the order of occurance
-    dst = [(place_id) for place_id in df['place_id']]
+    dst = [(place_id) for place_id in df[dst_index_col]]
 
     # apply rating threshold
     edge_attr = torch.from_numpy(df[link_index_col].values).view(-1, 1).to(torch.long) >= rating_threshold
@@ -62,7 +140,7 @@ def load_edge(df,
         if edge_attr[i]:
             edge_index[0].append(src[i])
             edge_index[1].append(dst[i])
-    return edge_index
+    return torch.LongTensor(edge_index)
 
 def data_split(edge_index):
     num_interactions = edge_index.shape[1]
