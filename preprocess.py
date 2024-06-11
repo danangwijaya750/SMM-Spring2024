@@ -7,6 +7,7 @@ import torch
 from sklearn.model_selection import train_test_split
 from transformers import pipeline
 from collections import Counter
+import random
 
 def load_encode_data(data):
     # Create bipartite graph
@@ -88,7 +89,11 @@ def preprocess_sentiment_score(ratings_df):
     model_name="lxyuan/distilbert-base-multilingual-cased-sentiments-student"
     classification = pipeline('sentiment-analysis', model=model_name,device=0)
     reviews=ratings_df['text'].to_numpy()
-    reviews_scores = [classify_long_review_pipeline(review,classification) for review in reviews]
+
+    reviews_scores = []
+    for review in tqdm(reviews, desc="Processing review sentiment score", unit=" review"):
+        reviews_scores.append(classify_long_review_pipeline(review, classification))
+
     ratings_df['sentiment_score'] = [x[0] for x in reviews_scores]
     ratings_df['sentiment_label'] = [x[1] for x in reviews_scores]
     label_to_weight = {'negative': 0.5, 'neutral': 1.0, 'positive': 1.5}
@@ -155,3 +160,29 @@ def data_split(edge_index):
     val_edge_index = edge_index[:, val_indices]
     test_edge_index = edge_index[:, test_indices]
     return train_edge_index, val_edge_index, test_edge_index, num_interactions
+
+def handle_empty_review(ratings_df):
+  for index, row in ratings_df.iterrows():
+    if len(row['text'])==0:
+      rating = row['rating']
+
+      positive_keywords = ['good', 'great', 'awesome', 'love', 'recommend']
+      negative_keywords = ['bad', 'terrible', 'awful', 'waste', 'disappointed']
+
+      if rating >= 4:
+        sentiment = 'positive'
+      elif rating <= 2:
+        sentiment = 'negative'
+      else:
+        sentiment = 'neutral'
+
+      if sentiment == 'positive':
+        review = f"I really enjoyed this hiking. It was {positive_keywords[random.randint(0, len(positive_keywords) - 1)]}."
+      elif sentiment == 'negative':
+        review = f"I was disappointed with this hiking. It was {negative_keywords[random.randint(0, len(negative_keywords) - 1)]}."
+      else:
+        review = "This hiking was okay."
+
+      ratings_df.at[index, 'text'] = review
+
+  return ratings_df

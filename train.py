@@ -7,11 +7,12 @@ import json
 import pandas as pd
 from tqdm import tqdm
 import utils
+import datetime
 
 import torch
 from torch import nn, optim, Tensor
 
-def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_edge_index, test_edge_index, num_interactions):
+def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_edge_index, test_edge_index, num_interactions, top_k):
     layers = 4
     model = LightGCN(num_users=num_users,
                     num_items=num_places,
@@ -25,7 +26,7 @@ def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_
     LR = 1e-3
     ITERS_PER_EVAL = 200
     ITERS_PER_LR_DECAY = 200
-    K = 20
+    K = top_k
     LAMBDA = 1e-6
     # LAMBDA = 1/2
 
@@ -51,6 +52,7 @@ def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_
     train_losses = []
     val_losses = []
     val_recall_at_ks = []
+    training_log=[]
 
     for iter in tqdm(range(ITERATIONS)):
         # forward propagation
@@ -87,6 +89,7 @@ def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_
                 train_losses.append(train_loss.item())
                 val_losses.append(val_loss)
                 val_recall_at_ks.append(round(recall, 5))
+                training_log.append("[Iteration {iter}/{ITERATIONS}] train_loss: {round(train_loss.item(), 5)}, val_loss: {round(val_loss, 5)}, val_recall@{K}: {round(recall, 5)}, val_precision@{K}: {round(precision, 5)}, val_ndcg@{K}: {round(ndcg, 5)}")
             model.train()
 
         if iter % ITERS_PER_LR_DECAY == 0 and iter != 0:
@@ -104,6 +107,14 @@ def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_
                                                                 )
 
     print(f"[test_loss: {round(test_loss, 5)}, test_recall@{K}: {round(test_recall, 5)}, test_precision@{K}: {round(test_precision, 5)}, test_ndcg@{K}: {round(test_ndcg, 5)}")
+    current_datetime = datetime.datetime.now()
+    formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"lightgcn_model_{formatted_datetime}"
+    torch.save(model.state_dict(), filename+".pth")
+    with open(filename+".txt", "w") as file:
+        for item in training_log:
+            file.write(item + "\n")
+    
 
 def train_eval_GCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions):
     model = GCN
@@ -112,6 +123,7 @@ def train_eval_GCN(num_users, num_places, train_edge_index, val_edge_index, test
 def main():
     parser = argparse.ArgumentParser(description="Select a machine learning model.")
     parser.add_argument('--model', type=str, choices=['GCN', 'LightGCN'], required=True, help='The name of the model to use.')
+    parser.add_argument('--top_k', type=int, required=False, help='top_k recommendation', default=20)
     parser.add_argument('--interaction', type=str, choices=['rating','review'],required=False, default='rating')
     parser.add_argument('--threshold', type=float, required=False, default=2.5)
     parser.add_argument('--data_path', type=str, required=True, help='The path to the data file.')
@@ -132,13 +144,14 @@ def main():
             data,num_users,num_places = preprocess.load_encode_data(data=data)
             edge_index = preprocess.load_edge(data,src_index_col='user_id',dst_index_col='place_id',link_index_col='rating',rating_threshold=args.threshold)
             train_edge_index, val_edge_index, test_edge_index, num_interactions = preprocess.data_split(edge_index=edge_index)
-            train_eval_LightGCN(num_users, num_places, edge_index,train_edge_index, val_edge_index, test_edge_index, num_interactions)
+            train_eval_LightGCN(num_users, num_places, edge_index,train_edge_index, val_edge_index, test_edge_index, num_interactions, args.top_k)
         elif args.interaction =='review' :
             data,num_users,num_places = preprocess.load_encode_data(data=data)
+            data = preprocess.handle_empty_review(data)
             data = preprocess.preprocess_sentiment_score(data)
             edge_index = preprocess.load_edge(data,src_index_col='user_id',dst_index_col='place_id',link_index_col='normalized_weighted_sentiment_score',rating_threshold=args.threshold)
             train_edge_index, val_edge_index, test_edge_index, num_interactions = preprocess.data_split(edge_index=edge_index)
-            train_eval_LightGCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions)
+            train_eval_LightGCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions, args.top_k)
 
 if __name__ == '__main__':
     main()
