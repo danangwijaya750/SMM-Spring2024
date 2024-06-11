@@ -151,7 +151,7 @@ def main():
             data = preprocess.preprocess_sentiment_score(data)
             edge_index = preprocess.load_edge(data,src_index_col='user_id',dst_index_col='place_id',link_index_col='normalized_weighted_sentiment_score',rating_threshold=args.threshold)
             train_edge_index, val_edge_index, test_edge_index, num_interactions = preprocess.data_split(edge_index=edge_index)
-            train_eval_LightGCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions, args.top_k)
+            train_eval_LightGCN(num_users, num_places, edge_index ,train_edge_index, val_edge_index, test_edge_index, num_interactions, args.top_k)
 
 if __name__ == '__main__':
     main()
