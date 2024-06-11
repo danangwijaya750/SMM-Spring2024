@@ -89,7 +89,7 @@ def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_
                 train_losses.append(train_loss.item())
                 val_losses.append(val_loss)
                 val_recall_at_ks.append(round(recall, 5))
-                training_log.append("[Iteration {iter}/{ITERATIONS}] train_loss: {round(train_loss.item(), 5)}, val_loss: {round(val_loss, 5)}, val_recall@{K}: {round(recall, 5)}, val_precision@{K}: {round(precision, 5)}, val_ndcg@{K}: {round(ndcg, 5)}")
+                training_log.append(f"[Iteration {iter}/{ITERATIONS}] train_loss: {round(train_loss.item(), 5)}, val_loss: {round(val_loss, 5)}, val_recall@{K}: {round(recall, 5)}, val_precision@{K}: {round(precision, 5)}, val_ndcg@{K}: {round(ndcg, 5)}")
             model.train()
 
         if iter % ITERS_PER_LR_DECAY == 0 and iter != 0:
