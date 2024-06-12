@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 from transformers import pipeline
 from collections import Counter
 import random
+import scipy.sparse as sp
 
 def load_encode_data(data):
     # Create bipartite graph
@@ -152,10 +153,10 @@ def data_split(edge_index):
     all_indices = [i for i in range(num_interactions)]
     train_indices, test_indices = train_test_split(all_indices,
                                                test_size=0.2,
-                                               random_state=1)
+                                               random_state=123)
     val_indices, test_indices = train_test_split(test_indices,
                                              test_size=0.5,
-                                             random_state=1)
+                                             random_state=123)
     train_edge_index = edge_index[:, train_indices]
     val_edge_index = edge_index[:, val_indices]
     test_edge_index = edge_index[:, test_indices]
@@ -186,3 +187,90 @@ def handle_empty_review(ratings_df):
       ratings_df.at[index, 'text'] = review
 
   return ratings_df
+
+
+#NGCF preprocess
+class DataLoader:
+    def __init__(self, df, batch_size):
+        self.df = df
+        self.batch_size = batch_size
+        self.n_users, self.n_items, self.n_data = 0, 0, 0
+        self.users = []
+        self.pos_items = {}
+        self.load()
+
+    def load(self):
+        for _, row in self.df.iterrows():
+            uid, iid = int(row['user_id']), int(row['place_id'])
+            if uid not in self.pos_items:
+                self.pos_items[uid] = []
+            self.pos_items[uid].append(iid)
+            self.n_items = max(self.n_items, iid)
+            self.n_users = max(self.n_users, uid)
+            self.n_data += 1
+            self.users.append(uid)
+        self.n_users += 1
+        self.n_items += 1
+
+        self.R = sp.dok_matrix((self.n_users, self.n_items), dtype=np.float32)
+        for u in self.users:
+            for i in self.pos_items[u]:
+                self.R[u, i] = 1.
+
+    def compute_norm_adj_matrix(self, adj):
+        rowsum = np.array(adj.sum(1))
+        d_inv = np.power(rowsum, -1).flatten()
+        d_inv[np.isinf(d_inv)] = 0.
+        d_mat_inv = sp.diags(d_inv)
+        norm_adj = d_mat_inv.dot(adj)
+        return norm_adj.tocoo()
+
+    def compute_adj_matrix(self):
+        A = sp.dok_matrix((self.n_users + self.n_items, self.n_users + self.n_items), dtype=np.float32).tolil()
+        A[:self.n_users, self.n_users:] = self.R.tolil()
+        A[self.n_users:, :self.n_users] = self.R.tolil().T
+        A = A.todok()
+        mean_adj = self.compute_norm_adj_matrix(A)
+        return mean_adj + sp.eye(mean_adj.shape[0])
+  
+    def set_adj_matrix(self):
+          adj = self.compute_adj_matrix()
+        #   sp.save_npz('adj_matrix.npz', adj.tocsr())
+          self.adj_matrix = adj
+
+    def sample_pos(self, u, amount):
+        high = len(self.pos_items[u])
+        pos_sample = []
+        while len(pos_sample) < amount:
+            id = np.random.randint(low=0, high=high, size=1)[0]
+            item = self.pos_items[u][id]
+            if item not in pos_sample:
+                pos_sample.append(item)
+        return pos_sample
+
+    def sample_neg(self, u, amount):
+        high = self.n_items
+        neg_sample = []
+        while len(neg_sample) < amount:
+            item = np.random.randint(low=0, high=high, size=1)[0]
+            if item not in self.pos_items[u] and item not in neg_sample:
+                neg_sample.append(item)
+        return neg_sample
+
+    def sample(self):
+        users = np.random.choice(self.users, size=self.batch_size)
+        pos_sample, neg_sample = [], []
+        for u in users:
+            pos_sample += self.sample_pos(u, 1)
+            neg_sample += self.sample_neg(u, 1)
+        return users, pos_sample, neg_sample
+
+def preprocess_ngcf(data,threshold):
+    data.drop(data[data['rating'] < threshold].index, inplace=True)
+    train_df, val_test_df = train_test_split(data, test_size=0.2, random_state=123)
+    val_df, test_df = train_test_split(val_test_df, test_size=0.5, random_state=123)
+    train_data = DataLoader(train_df, batch_size=32)
+    val_data = DataLoader(val_df, batch_size=32)
+    test_data = DataLoader(test_df, batch_size=32)
+    train_data.set_adj_matrix()
+    return train_data,test_data

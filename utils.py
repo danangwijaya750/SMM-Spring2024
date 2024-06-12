@@ -64,3 +64,36 @@ def sample_mini_batch(batch_size, edge_index):
 
     user_indices, pos_item_indices, neg_item_indices = batch[0], batch[1], batch[2]
     return user_indices, pos_item_indices, neg_item_indices
+
+
+# NGCF UTILS
+def split_mtx(X, n_folds=200):
+  """
+  Split a matrix/Tensor into n parts.
+  Useful for processing large matrices in batches
+  """
+  X_folds = []
+  fold_len = X.shape[0]//n_folds
+  for i in range(n_folds):
+    start = i * fold_len
+    if i == n_folds -1:
+      end = X.shape[0]
+    else:
+      end = (i + 1) * fold_len
+    X_folds.append(X[start:end])
+  return X_folds
+
+def to_sparse_tensor(X):
+  """
+  Convert a sparse numpy object to a sparse pytorch tensor.
+  Note that the tensor does not yet live on the GPU
+  """
+  coo = X.tocoo().astype(np.float32)
+  i = torch.LongTensor(np.mat((coo.row, coo.col)))
+  v = torch.FloatTensor(coo.data)
+  return torch.sparse.FloatTensor(i, v, coo.shape)
+
+def save_state(model, optimizer, iteration, name):
+  torch.save(model.state_dict(), name+".pt")
+  torch.save(optimizer.state_dict(), name+"-opt.pt")
+  torch.save(torch.IntTensor(iteration), name+"-it.pt")

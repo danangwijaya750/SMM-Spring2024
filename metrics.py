@@ -2,7 +2,7 @@ import random
 import numpy as np
 import torch
 from torch_sparse import SparseTensor, matmul
-from utils import convert_adj_mat_edge_index_to_r_mat_edge_index, convert_r_mat_edge_index_to_adj_mat_edge_index, sample_mini_batch
+from utils import convert_adj_mat_edge_index_to_r_mat_edge_index, convert_r_mat_edge_index_to_adj_mat_edge_index, sample_mini_batch, split_mtx
 from torch_geometric.utils import structured_negative_sampling
 
 def bpr_loss(users_emb_final,
@@ -271,3 +271,59 @@ def evaluation(model, edge_index, exclude_edge_indices, k, lambda_val, num_users
     recall, precision, ndcg = get_metrics(model, edge_index, exclude_edge_indices, k,num_users=num_users,num_places=num_places)
 
     return loss, recall, precision, ndcg
+
+# NGCF Mertrics
+def compute_ndcg(top_items, test_items, test_indices, k,device):
+  ratings = (test_items * top_items).gather(1, test_indices)
+  norm = torch.from_numpy(np.log2(np.arange(2, k+2))).float().to(device)
+  dcg = (ratings / norm).sum(1)
+  dcg_max = (torch.sort(ratings, dim=1, descending=True)[0] / norm).sum(1)
+  ndcg = dcg / dcg_max
+  ndcg[torch.isnan(ndcg)] = 0
+  return ndcg
+
+def evaluate(user_embeddings, item_embeddings, k, data,train_data,device):
+    user_parts = split_mtx(user_embeddings)
+    train_parts = split_mtx(train_data.R)
+    test_parts = split_mtx(data.R)
+
+    recall_parts, ndcg_parts, precision_parts = [], [], []
+
+    for user_part, train_part, test_part in zip(user_parts, train_parts, test_parts):
+
+        # Get the prediction scores for the users and items as a cuda float
+        non_train_items = torch.from_numpy(1 - (train_part.todense())).float().to(device)
+        predictions = torch.mm(user_part, item_embeddings.t()) * non_train_items
+        # Get the k highest scores, scatter them as a float tensor in the GPU
+        _, test_indices = torch.topk(predictions, dim=1, k=k)
+        test_items = torch.from_numpy(test_part.todense()).float().to(device)
+        top_items = torch.zeros_like(test_items).to(device)
+        max_index = top_items.size(1) - 1  # Get the maximum valid index
+        test_indices = test_indices.clamp(max=max_index)  # Clip indices to the valid range
+        top_items.scatter_(dim=1, index=test_indices, src=torch.ones_like(top_items).to(device))
+
+        # Calculate True Positives (TP)
+        TP = (test_items * top_items).sum(1)
+        
+        # Calculate Precision@K
+        precision = TP / k
+        precision_parts.append(precision)
+
+        # Calculate Recall@K
+        recall = TP / test_items.sum(1)
+        recall[torch.isnan(recall)] = 0  # Handling division by zero
+        recall_parts.append(recall)
+
+        # Calculate NDCG@K
+        ndcg = compute_ndcg(top_items, test_items, test_indices, k,device=device)
+        ndcg_parts.append(ndcg)
+
+    # Compute mean values
+    mean_recall = torch.cat(recall_parts).mean()
+    mean_ndcg = torch.cat(ndcg_parts).mean()
+    mean_precision = torch.cat(precision_parts).mean()
+
+    # Print evaluation metrics
+    print('Recall@{}:\t{:.4f}'.format(k, mean_recall.item()))
+    print('NDCG@{}:\t{:.4f}'.format(k, mean_ndcg.item()))
+    print('Precision@{}:\t{:.4f}'.format(k, mean_precision.item()))

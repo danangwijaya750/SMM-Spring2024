@@ -2,12 +2,14 @@ import argparse
 import preprocess
 import utils
 import metrics
-from models import GCN, LightGCN
+from models import LightGCN, NGCF
 import json
 import pandas as pd
 from tqdm import tqdm
 import utils
 import datetime
+from time import time
+import numpy as np
 
 import torch
 from torch import nn, optim, Tensor
@@ -53,7 +55,7 @@ def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_
     val_losses = []
     val_recall_at_ks = []
     training_log=[]
-
+    start = time()
     for iter in tqdm(range(ITERATIONS)):
         # forward propagation
         users_emb_final, users_emb_0,  pos_items_emb_final, pos_items_emb_0, neg_items_emb_final, neg_items_emb_0 \
@@ -107,22 +109,56 @@ def train_eval_LightGCN(num_users, num_places,edge_index, train_edge_index, val_
                                                                 )
 
     print(f"[test_loss: {round(test_loss, 5)}, test_recall@{K}: {round(test_recall, 5)}, test_precision@{K}: {round(test_precision, 5)}, test_ndcg@{K}: {round(test_ndcg, 5)}")
+    print('Finished Training and Testing in\t' + str(time()-start) + ' sec')
     current_datetime = datetime.datetime.now()
     formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"lightgcn_model_{formatted_datetime}"
-    torch.save(model.state_dict(), filename+".pth")
+    utils.save_state(model=model,optimizer=optimizer,iteration=ITERATIONS,name=str(filename))
     with open(filename+".txt", "w") as file:
         for item in training_log:
             file.write(item + "\n")
     
 
-def train_eval_GCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions):
-    model = GCN
-
+def train_eval_NGCF(train_data, test_data):
+    # setup
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device {device}.")
+    model = NGCF(n_users=train_data.n_users, n_items=train_data.n_items, embed_size=64, n_layers=4, adj_matrix=train_data.adj_matrix,device=device).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    ITERATIONS=20
+    n_batch = train_data.n_data // train_data.batch_size + 1
+    start = time()
+    for t in range(ITERATIONS):
+        model.train()
+        print('Starting iteration: ' + str(t + 1))
+        total_loss = 0
+        # Wrap the batch loop with tqdm for progress tracking
+        for b in tqdm(range(n_batch), desc=f"Iteration {t + 1}/{ITERATIONS}", unit="batch"):
+            u, i, j = train_data.sample()
+            u = torch.from_numpy(u).long().to(device)
+            i = torch.LongTensor(i).to(device)
+            j = torch.LongTensor(j).to(device)
+            optimizer.zero_grad()
+            loss = model(u, i, j)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        print('Total BPR loss:\t\t' + str(total_loss))
+        model.eval()
+        with torch.no_grad():
+            metrics.evaluate(model.user_embeddings_final.detach(), model.item_embeddings_final.detach(), k=20, data=test_data,train_data=train_data,device=device)
+        print('\n============\n')
+    model.eval()
+    metrics.evaluate(model.user_embeddings_final.detach(), model.item_embeddings_final.detach(), k=20,data=test_data,train_data=train_data,device=device)
+    print('Finished Training and Testing in\t' + str(time()-start) + ' sec')
+    current_datetime = datetime.datetime.now()
+    formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"ngcf_model_{formatted_datetime}"
+    utils.save_state(model=model,optimizer=optimizer,iteration=ITERATIONS,name=str(filename))
 
 def main():
     parser = argparse.ArgumentParser(description="Select a machine learning model.")
-    parser.add_argument('--model', type=str, choices=['GCN', 'LightGCN'], required=True, help='The name of the model to use.')
+    parser.add_argument('--model', type=str, choices=['NGCF', 'LightGCN'], required=True, help='The name of the model to use.')
     parser.add_argument('--top_k', type=int, required=False, help='top_k recommendation', default=20)
     parser.add_argument('--interaction', type=str, choices=['rating','review'],required=False, default='rating')
     parser.add_argument('--threshold', type=float, required=False, default=2.5)
@@ -136,8 +172,10 @@ def main():
     # edge_index = preprocess.load_edge(data)
     # train_edge_index, val_edge_index, test_edge_index, num_interactions = preprocess.data_split(edge_index=edge_index)
 
-    if args.model == 'GCN':
-        train_eval_GCN(num_users, num_places, train_edge_index, val_edge_index, test_edge_index, num_interactions)
+    if args.model == 'NGCF':
+        data,num_users,num_places = preprocess.load_encode_data(data=data)
+        train_data,test_data =preprocess.preprocess_ngcf(data=data,threshold=args.threshold)
+        train_eval_NGCF(train_data=train_data,test_data=test_data)
 
     elif args.model == 'LightGCN':
         if args.interaction == 'rating':

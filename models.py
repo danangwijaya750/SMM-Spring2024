@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn, optim, Tensor
+from torch.nn import init, LeakyReLU, Linear, Module, ModuleList, Parameter
 
 from torch_geometric.data import Data
 from torch_geometric.utils import degree
@@ -12,6 +13,8 @@ from torch_geometric.typing import Adj
 from torch_geometric.nn import GCNConv
 
 from torch_sparse import SparseTensor, matmul
+
+import utils
 
 
 class LightGCN(MessagePassing):
@@ -145,14 +148,75 @@ class LightGCN(MessagePassing):
         return norm.view(-1, 1) * x_j
     
 
-class GCN(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels):
-        super(GCN, self).__init__()
-        self.conv1 = GCNConv(in_channels, hidden_channels)
-        self.conv2 = GCNConv(hidden_channels, out_channels)
+class NGCF(Module):
+  def __init__(self, n_users, n_items, embed_size, n_layers, adj_matrix, device):
+    super().__init__()
+    self.n_users = n_users
+    self.n_items = n_items
+    self.embed_size = embed_size
+    self.n_layers = n_layers
+    self.adj_matrix = adj_matrix
+    self.device = device
 
-    def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = self.conv2(x, edge_index)
-        return x
+    # The (user/item)_embeddings are the initial embedding matrix E
+    self.user_embeddings = Parameter(torch.rand(n_users, embed_size))
+    self.item_embeddings = Parameter(torch.rand(n_items, embed_size))
+    # The (user/item)_embeddings_final are the final concatenated embeddings [E_1..E_L]
+    # Stored for easy tracking of final embeddings throughout optimization and eval
+    self.user_embeddings_final = Parameter(torch.zeros((n_users, embed_size * (n_layers + 1))))
+    self.item_embeddings_final = Parameter(torch.zeros((n_items, embed_size * (n_layers + 1))))
+
+    # The linear transformations for each layer
+    self.W1 = ModuleList([Linear(self.embed_size, self.embed_size) for _ in range(0, self.n_layers)])
+    self.W2 = ModuleList([Linear(self.embed_size, self.embed_size) for _ in range(0, self.n_layers)])
+
+    self.act = LeakyReLU()
+    
+    # Initialize each of the trainable weights with the Xavier initializer
+    self.init_weights()
+
+  def init_weights(self):
+    for name, parameter in self.named_parameters():
+      if ('bias' not in name):
+        init.xavier_uniform_(parameter)
+
+  def compute_loss(self, batch_user_emb, batch_pos_emb, batch_neg_emb):
+    pos_y = torch.mul(batch_user_emb, batch_pos_emb).sum(dim=1)
+    neg_y = torch.mul(batch_user_emb, batch_neg_emb).sum(dim=1)
+    # Unregularized loss
+    bpr_loss = -(torch.log(torch.sigmoid(pos_y - neg_y))).mean()
+    return bpr_loss
+
+  def forward(self, u, i, j):
+    adj_splits = utils.split_mtx(self.adj_matrix)
+    embeddings = torch.cat((self.user_embeddings, self.item_embeddings))
+    final_embeddings = [embeddings]
+
+    for l in range(self.n_layers):
+      embedding_parts = []
+      for part in adj_splits:
+        embedding_parts.append(torch.sparse.mm(utils.to_sparse_tensor(part).to(self.device), embeddings))
+
+      # Message construction
+      t1_embeddings = torch.cat(embedding_parts, 0)
+      t1 = self.W1[l](t1_embeddings)
+      t2_embeddings = embeddings.mul(t1_embeddings)
+      t2 = self.W2[l](t2_embeddings)
+
+      # Message aggregation
+      embeddings = self.act(t1 + t2)
+      normalized_embeddings = F.normalize(embeddings, p=2, dim=1)
+      final_embeddings.append(normalized_embeddings)
+
+    # Make sure to update the (user/item)_embeddings(_final)
+    final_embeddings = torch.cat(final_embeddings, 1)
+    final_u_embeddings, final_i_embeddings = final_embeddings.split((self.n_users, self.n_items), 0)
+    self.user_embeddings_final = Parameter(final_u_embeddings)
+    self.item_embeddings_final = Parameter(final_i_embeddings)
+
+    batch_user_emb = final_u_embeddings[u]
+    batch_pos_emb = final_i_embeddings[i]
+    batch_neg_emb = final_i_embeddings[j]
+
+    return self.compute_loss(batch_user_emb, batch_pos_emb, batch_neg_emb)
+     
