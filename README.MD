@@ -28,10 +28,10 @@ pip install -r requirements.txt
 The results of the training would be as follow
 
 Result of Training and Valdidation Loss
-![alt text](image-2.png)
+![alt text](image/image-2.png)
 
 Result of Recall K Curves
-![alt text](image-1.png)
+![alt text](image/image-1.png)
 
 Here are our result on the experiment
 |                   |                                                |                                        |                                         |      |

@@ -87,7 +87,7 @@ def classify_long_review_pipeline(review,classification):
 
 def preprocess_sentiment_score(ratings_df):
     model_name="lxyuan/distilbert-base-multilingual-cased-sentiments-student"
-    classification = pipeline('sentiment-analysis', model=model_name,device=0)
+    classification = pipeline('sentiment-analysis', model=model_name)
     reviews=ratings_df['text'].to_numpy()
 
     reviews_scores = []
